@@ -1,0 +1,47 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id        String      @id @default(uuid())
+  title     String
+  content   String
+  summary   String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  tags      TagsOnDocuments[]
+  analyses  AIAnalysis[]
+}
+
+model Tag {
+  id        String      @id @default(uuid())
+  name      String      @unique
+  createdAt DateTime    @default(now())
+  documents TagsOnDocuments[]
+}
+
+model TagsOnDocuments {
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
+  tag        Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId      String
+
+  @@id([documentId, tagId])
+}
+
+model AIAnalysis {
+  id          String   @id @default(uuid())
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId  String   @unique
+  analysis    String
+  categories  String   // Comma-separated list of categories
+  createdAt   DateTime @default(now())
+}
