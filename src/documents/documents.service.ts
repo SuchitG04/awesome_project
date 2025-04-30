@@ -1,62 +1,74 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, Like, ILike } from 'typeorm';
+import { Document } from '../database/entities/document.entity';
+import { Tag } from '../database/entities/tag.entity';
+import { TagsOnDocuments } from '../database/entities/tags-on-documents.entity';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 
 @Injectable()
 export class DocumentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    @InjectRepository(Document)
+    private documentRepository: Repository<Document>,
+    @InjectRepository(Tag)
+    private tagRepository: Repository<Tag>,
+    @InjectRepository(TagsOnDocuments)
+    private tagsOnDocumentsRepository: Repository<TagsOnDocuments>
+  ) {}
 
   async create(createDocumentDto: CreateDocumentDto) {
     const { tags, ...documentData } = createDocumentDto;
     
-    // Create document with tags if provided
-    return this.prisma.document.create({
-      data: {
-        ...documentData,
-        tags: tags && tags.length > 0 ? {
-          create: tags.map(tagName => ({
-            tag: {
-              connectOrCreate: {
-                where: { name: tagName },
-                create: { name: tagName },
-              },
-            },
-          })),
-        } : undefined,
-      },
-      include: {
-        tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
-    });
+    // Create document
+    const document = this.documentRepository.create(documentData);
+    await this.documentRepository.save(document);
+    
+    // Create tags if provided
+    if (tags && tags.length > 0) {
+      for (const tagName of tags) {
+        // Find or create tag
+        let tag = await this.tagRepository.findOne({ where: { name: tagName } });
+        if (!tag) {
+          tag = this.tagRepository.create({ name: tagName });
+          await this.tagRepository.save(tag);
+        }
+        
+        // Create relation
+        const tagOnDocument = this.tagsOnDocumentsRepository.create({
+          documentId: document.id,
+          tagId: tag.id,
+          document,
+          tag
+        });
+        await this.tagsOnDocumentsRepository.save(tagOnDocument);
+      }
+    }
+    
+    // Return document with tags
+    return this.findOne(document.id);
   }
 
   async findAll() {
-    return this.prisma.document.findMany({
-      include: {
+    const documents = await this.documentRepository.find({
+      relations: {
         tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
+          tag: true
+        }
+      }
     });
+    return documents;
   }
 
   async findOne(id: string) {
-    const document = await this.prisma.document.findUnique({
+    const document = await this.documentRepository.findOne({
       where: { id },
-      include: {
+      relations: {
         tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
+          tag: true
+        }
+      }
     });
 
     if (!document) {
@@ -70,59 +82,49 @@ export class DocumentsService {
     const { tags, ...documentData } = updateDocumentDto;
     
     // Check if document exists
-    const existingDocument = await this.prisma.document.findUnique({
+    const existingDocument = await this.documentRepository.findOne({
       where: { id },
-      include: { tags: true },
+      relations: { tags: true }
     });
 
     if (!existingDocument) {
       throw new NotFoundException(`Document with ID ${id} not found`);
     }
 
+    // Update document data
+    await this.documentRepository.update(id, documentData);
+
     // If tags are provided, update them
     if (tags) {
       // Delete existing tags
-      await this.prisma.tagsOnDocuments.deleteMany({
-        where: { documentId: id },
-      });
+      await this.tagsOnDocumentsRepository.delete({ documentId: id });
 
       // Create new tag connections
-      await Promise.all(
-        tags.map(async (tagName) => {
-          const tag = await this.prisma.tag.upsert({
-            where: { name: tagName },
-            update: {},
-            create: { name: tagName },
-          });
-
-          return this.prisma.tagsOnDocuments.create({
-            data: {
-              documentId: id,
-              tagId: tag.id,
-            },
-          });
-        })
-      );
+      for (const tagName of tags) {
+        // Find or create tag
+        let tag = await this.tagRepository.findOne({ where: { name: tagName } });
+        if (!tag) {
+          tag = this.tagRepository.create({ name: tagName });
+          await this.tagRepository.save(tag);
+        }
+        
+        // Create relation
+        const tagOnDocument = this.tagsOnDocumentsRepository.create({
+          documentId: id,
+          tagId: tag.id
+        });
+        await this.tagsOnDocumentsRepository.save(tagOnDocument);
+      }
     }
 
-    // Update document data
-    return this.prisma.document.update({
-      where: { id },
-      data: documentData,
-      include: {
-        tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
-    });
+    // Return updated document with tags
+    return this.findOne(id);
   }
 
   async remove(id: string) {
     // Check if document exists
-    const document = await this.prisma.document.findUnique({
-      where: { id },
+    const document = await this.documentRepository.findOne({
+      where: { id }
     });
 
     if (!document) {
@@ -130,9 +132,8 @@ export class DocumentsService {
     }
 
     // Delete document (cascade will handle related entities)
-    return this.prisma.document.delete({
-      where: { id },
-    });
+    await this.documentRepository.delete(id);
+    return { id };
   }
 
   async search(query: string) {
@@ -140,25 +141,22 @@ export class DocumentsService {
       return this.findAll();
     }
 
-    // For SQLite, we'll use a simpler search without case-insensitive mode
-    // We'll convert both the search query and the fields to lowercase for case-insensitive search
-    const lowerQuery = query.toLowerCase();
-
-    // Get all documents first
-    const documents = await this.prisma.document.findMany({
-      include: {
+    // For SQLite, we need to use LIKE for search
+    // We'll use the % wildcard for partial matches
+    const searchPattern = `%${query}%`;
+    
+    const documents = await this.documentRepository.find({
+      where: [
+        { title: Like(searchPattern) },
+        { content: Like(searchPattern) }
+      ],
+      relations: {
         tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
+          tag: true
+        }
+      }
     });
 
-    // Filter documents manually for case-insensitive search
-    return documents.filter(doc => 
-      doc.title.toLowerCase().includes(lowerQuery) || 
-      doc.content.toLowerCase().includes(lowerQuery)
-    );
+    return documents;
   }
 }

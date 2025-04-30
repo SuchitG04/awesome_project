@@ -26,7 +26,7 @@ This project is an AI-Enhanced Knowledge Management System that allows users to 
 ## Tech Stack
 
 - **Backend Framework**: NestJS (TypeScript)
-- **Database**: SQLite with Prisma ORM
+- **Database**: SQLite with TypeORM
 - **AI Integration**: OpenAI API
 - **API Documentation**: Swagger
 - **Validation**: class-validator and class-transformer
@@ -53,11 +53,8 @@ $ npm install
 # Copy the example .env file and update with your values
 $ cp .env.example .env
 
-# Generate Prisma client
-$ npx prisma generate
-
-# Run database migrations
-$ npx prisma migrate dev --name init
+# The database will be automatically created when you start the application
+# TypeORM is configured to synchronize the schema automatically in development
 ```
 
 ## Running the Application
@@ -92,7 +89,7 @@ Swagger API documentation will be available at http://localhost:3000/api/docs
 ## Environment Variables
 
 ```
-DATABASE_URL="file:./dev.db"
+DATABASE_URL="./database.sqlite"
 OPENAI_API_KEY="your-openai-api-key"
 PORT=3000
 ```

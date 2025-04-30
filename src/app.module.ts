@@ -5,14 +5,14 @@ import { AppService } from './app.service';
 import { DocumentsModule } from './documents/documents.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { OpenaiModule } from './openai/openai.module';
-import { PrismaModule } from './prisma/prisma.module';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    PrismaModule,
+    DatabaseModule,
     DocumentsModule,
     AnalysisModule,
     OpenaiModule,
